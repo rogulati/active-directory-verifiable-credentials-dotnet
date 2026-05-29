@@ -98,21 +98,21 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Entra ID tenant ID for OAuth 2.0 Bearer token validation. Leave empty to disable."
+        "description": "Optional. EasyAuth is the recommended way to protect the function (see README Step 5). EntraId__TenantId is an alternative in-code Bearer token validation path for environments where EasyAuth cannot be used. Leave empty when EasyAuth is configured."
       }
     },
     "entraIdClientId": {
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Entra ID application (client) ID of the Function App's app registration for OAuth 2.0. Leave empty to disable."
+        "description": "Optional. EasyAuth is the recommended way to protect the function (see README Step 5). EntraId__ClientId is an alternative in-code Bearer token validation path for environments where EasyAuth cannot be used. Leave empty when EasyAuth is configured."
       }
     },
     "repoUrl": {
       "type": "string",
-      "defaultValue": "https://github.com/rogulati/AccountRecoveryClaimsMatchingAPI",
+      "defaultValue": "https://github.com/Azure-Samples/active-directory-verifiable-credentials-dotnet",
       "metadata": {
-        "description": "URL of the GitHub repository containing the function code. The ARM template will deploy both infrastructure and code from this repo."
+        "description": "URL of the GitHub repository containing the function code. Defaults to this Azure-Samples monorepo; Kudu builds the 7-AccountRecovery-ClaimsMatching subfolder via the COMMAND app setting."
       }
     },
     "branch": {
@@ -172,11 +172,11 @@
       "name": "[variables('hostingPlanName')]",
       "location": "[parameters('location')]",
       "sku": {
-        "name": "Y1",
-        "tier": "Dynamic",
-        "size": "Y1",
-        "family": "Y",
-        "capacity": 0
+        "name": "B1",
+        "tier": "Basic",
+        "size": "B1",
+        "family": "B",
+        "capacity": 1
       },
       "kind": "functionapp",
       "properties": {
@@ -209,18 +209,11 @@
           "ftpsState": "Disabled",
           "minTlsVersion": "1.2",
           "http20Enabled": true,
+          "alwaysOn": true,
           "appSettings": [
             {
               "name": "AzureWebJobsStorage",
               "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccountName'), ';EndpointSuffix=', environment().suffixes.storage, ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2022-09-01').keys[0].value)]"
-            },
-            {
-              "name": "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING",
-              "value": "[concat('DefaultEndpointsProtocol=https;AccountName=', variables('storageAccountName'), ';EndpointSuffix=', environment().suffixes.storage, ';AccountKey=', listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2022-09-01').keys[0].value)]"
-            },
-            {
-              "name": "WEBSITE_CONTENTSHARE",
-              "value": "[toLower(parameters('functionAppName'))]"
             },
             {
               "name": "FUNCTIONS_EXTENSION_VERSION",
@@ -241,6 +234,10 @@
             {
               "name": "SCM_COMMAND_IDLE_TIMEOUT",
               "value": "600"
+            },
+            {
+              "name": "COMMAND",
+              "value": "7-AccountRecovery-ClaimsMatching\\deploy.cmd"
             },
             {
               "name": "Excel__ShareUrl",

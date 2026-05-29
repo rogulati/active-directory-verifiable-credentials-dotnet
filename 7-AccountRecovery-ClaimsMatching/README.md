@@ -165,37 +165,28 @@ The `claims` object is **dynamic** — you can include any set of key/value pair
 
 ### Deploy to Azure
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Frogulati%2FAccountRecoveryClaimsMatchingAPI%2Fmain%2FARMTemplate%2Ftemplate.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FAzure-Samples%2Factive-directory-verifiable-credentials-dotnet%2Fmain%2F7-AccountRecovery-ClaimsMatching%2FARMTemplate%2Ftemplate.json/createUIDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2FAzure-Samples%2Factive-directory-verifiable-credentials-dotnet%2Fmain%2F7-AccountRecovery-ClaimsMatching%2FARMTemplate%2FcreateUiDefinition.json)
 
-You will be prompted for the following parameters:
+The button opens a guided portal wizard (driven by `createUiDefinition.json`) that prompts only for the values you actually need.
 
 | Parameter | Description |
 |-----------|-------------|
-| **Function App Name** | Globally unique name for the Function App |
-| **Storage Account Type** | Storage SKU — `Standard_LRS`, `Standard_GRS`, or `Standard_RAGRS` |
-| **Location** | Azure region (defaults to the resource group's location) |
-| **Excel Share URL** | *(optional)* HTTP(S) URL to the Excel file (OneDrive, Azure Blob, etc.) |
-| **Excel Sheet Name** | *(optional)* Worksheet name (defaults to `Sheet1`) |
-| **Excel Cache Minutes** | *(optional)* Minutes to cache parsed Excel data (defaults to `5`) |
-| **Claims Validator Provider** | *(optional)* `excel` (default) or `hrapi` |
-| **HR API Base URL** | *(optional)* Base URL of your HR REST API. Required when using `hrapi` provider |
-| **HR API Auth Mode** | *(optional)* `apikey` or `oauth`. Required when using `hrapi` provider |
-| **HR API API Key** | *(optional, secure)* API key for HR API. Required when auth mode is `apikey` |
-| **HR API OAuth Scope** | *(optional)* OAuth scope for HR API. Required when auth mode is `oauth` |
-| **Entra ID Tenant ID** | *(optional)* Entra ID tenant ID for OAuth Bearer validation. Leave empty to disable |
-| **Entra ID Client ID** | *(optional)* App registration client ID for OAuth. Leave empty to disable |
-| **Repo URL** | *(optional)* GitHub repository URL for source deployment (defaults to this repo) |
-| **Branch** | *(optional)* Branch to deploy (defaults to `main`) |
-| **.NET Version** | *(optional)* `.NET` runtime version — `v10.0` (default) or `v8.0`. Use `v8.0` if .NET 10 is not yet available in your region |
+| **Function App Name** | Globally unique name for the Function App. |
+| **.NET Version** | `.NET 10` (default) or `.NET 8 (LTS)`. Pick `.NET 8` if `.NET 10` isn't yet supported in your region. |
+| **Claims Validator Provider** | `excel` (default, for testing) or `hrapi` (production). Selects which `IClaimsValidator` runs. |
+| **Excel … / HR API …** | Provider-specific settings. The wizard only shows the group matching your provider choice. |
+| **Entra Tenant ID / Client ID** *(optional)* | EasyAuth is the recommended way to protect the function (see [Step 5 of the Learn tutorial](https://learn.microsoft.com/entra/identity-platform/tutorial-custom-authentication-extension-account-recovery#step-5-protect-your-azure-function)). `EntraId__*` is an alternative in-code Bearer validation path for environments where EasyAuth can't be used. Leave blank when EasyAuth is configured. |
+| **Repository URL / Branch** *(advanced)* | Defaults to this Azure-Samples monorepo on `main`. Override only to deploy a fork or pinned branch. Kudu builds the `7-AccountRecovery-ClaimsMatching` subfolder via the `COMMAND` app setting and `deploy.cmd`. |
+| **Storage Redundancy** *(advanced)* | `LRS` (default), `GRS`, or `RA-GRS` for the supporting storage account. |
 
 The template deploys **both infrastructure and code**:
-- **Azure Function App** (Consumption plan, .NET isolated worker, v4 runtime)
-- **Source control integration** — automatically pulls and builds the function code from the GitHub repository
-- **Storage Account** — Required runtime dependency for Azure Functions on the Consumption plan. The Functions host uses it for trigger management and internal orchestration (`AzureWebJobsStorage`). On Consumption plans, it also hosts an Azure Files share that stores the deployed function code for scale-out (`WEBSITE_CONTENTSHARE`). Your application code does not interact with it directly. The storage account name is derived from the function app name (first 10 alphanumeric characters) plus a unique hash and `sa` suffix (e.g., `acctrecovexi1q2r3s4tsa`), making it easy to identify in the Azure portal.
-- **Application Insights** for monitoring and logging
-- **System-assigned Managed Identity**
+- **Azure Function App** on a **B1 (Basic) App Service plan** with `alwaysOn = true` — single dedicated instance, no cold starts, ~$13/month flat. .NET isolated worker, v4 runtime.
+- **Source control integration** — Kudu clones the GitHub repo at deployment time and runs `7-AccountRecovery-ClaimsMatching\deploy.cmd` (set via the `COMMAND` app setting) to build and publish the subfolder.
+- **Storage Account** — used for `AzureWebJobsStorage` (trigger metadata and host orchestration). Your application code does not interact with it directly. The storage account name is derived from the function app name (first 10 alphanumeric characters) plus a unique hash and `sa` suffix (e.g., `acctrecovexi1q2r3s4tsa`).
+- **Application Insights** for monitoring and logging.
+- **System-assigned Managed Identity** — used by the HR API provider's OAuth auth mode.
 
-> **Note:** If you see a "Runtime version: Error" after deployment, your region may not support .NET 10 on the Consumption plan yet. Redeploy with the **.NET Version** parameter set to `v8.0`.
+> **Note:** If you see `Runtime version: Error` after deployment, your region may not support .NET 10 yet. Redeploy with the **.NET Version** parameter set to `.NET 8 (LTS)`.
 
 ### Post-Deployment
 
@@ -206,31 +197,30 @@ https://<your-function-app-name>.azurewebsites.net/api/CustomClaimMatching
 
 ### Authentication
 
-The function uses `AuthorizationLevel.Anonymous` — **no function keys are required**. All authentication is via OAuth 2.0 Bearer tokens validated by `TokenValidationService`.
+The function uses `AuthorizationLevel.Anonymous` — **no function keys are required**. Authentication is enforced by one of two mechanisms:
 
-#### OAuth 2.0 Client Credentials Flow (Entra Custom Auth Extension)
+1. **App Service authentication ("EasyAuth") — recommended.** Configured per [Step 5 of the Learn tutorial](https://learn.microsoft.com/entra/identity-platform/tutorial-custom-authentication-extension-account-recovery#step-5-protect-your-azure-function). Validation happens at the platform layer before requests reach your code.
+2. **In-code `TokenValidationService` — optional alternative.** Enabled when both `EntraId__TenantId` and `EntraId__ClientId` are set. Use this only in environments where EasyAuth can't be configured.
 
-When the function is registered as an **Entra ID custom authentication extension**, Entra calls it using the OAuth 2.0 client credentials flow:
+When the function is registered as an Entra ID custom authentication extension, Entra calls it using the OAuth 2.0 client credentials flow:
 
-1. Entra acquires a token from `https://login.microsoftonline.com/{tenantId}/v2.0` with the Function App's app registration as the audience
-2. Entra sends the token in the `Authorization: Bearer <token>` header
-3. The function validates the JWT — checking issuer, audience, signature, and expiration via OIDC discovery
+1. Entra acquires a token from `https://login.microsoftonline.com/{tenantId}/v2.0` with the Function App's app registration as the audience.
+2. Entra sends the token in the `Authorization: Bearer <token>` header.
+3. Either EasyAuth (recommended) or `TokenValidationService` (optional) validates the JWT — issuer, audience, signature, and expiration — via OIDC discovery.
 
-**Required App Settings** (enable Bearer token validation):
+**Optional `EntraId__*` app settings** (only when not using EasyAuth):
 
 | Setting | Description |
 |---------|-------------|
-| `EntraId__TenantId` | Your Entra ID tenant ID (GUID) |
-| `EntraId__ClientId` | Application (client) ID of the Function App's app registration |
+| `EntraId__TenantId` *(optional)* | Your Entra ID tenant ID (GUID). Leave empty when EasyAuth is configured. |
+| `EntraId__ClientId` *(optional)* | Application (client) ID of the Function App's app registration. Leave empty when EasyAuth is configured. |
 
-> **Note:** The `EntraId__TenantId` and `EntraId__ClientId` app settings are no longer used. Authentication is handled entirely by EasyAuth. Keep these empty or remove them from your Function App's environment variables.
+#### Verifying authentication
 
-#### Verifying Authentication
+Once EasyAuth (or `EntraId__*`) is configured, verify it works:
 
-Once EasyAuth is configured, verify it works:
-
-1. **Without a token:** Call the function URL directly — you should get `401 Unauthorized`
-2. **With a valid token:** Include a Bearer token with the correct audience — you should get the claims validation response
+1. **Without a token:** call the function URL directly — you should get `401 Unauthorized`.
+2. **With a valid token:** include a Bearer token with the correct audience — you should get the claims validation response.
 
 **Verify in Application Insights logs:**
 
@@ -386,11 +376,9 @@ Add these to `local.settings.json` (local) or Function App **Configuration** (Az
 
 ## Cold Start Mitigation
 
-The function app includes a **KeepAlive** timer-triggered function that fires every 4 minutes (`0 */4 * * * *`). This prevents the Consumption plan from deallocating the instance after ~20 minutes of inactivity, effectively eliminating cold starts.
+The ARM template deploys the function on a **B1 (Basic) App Service plan with `alwaysOn = true`**, so the host stays warm 24×7 and the first CAE call after a quiet period does not cold-start.
 
-- **Cost:** ~10,800 executions/month — well within the Consumption plan's free grant of 1 million executions
-- **Benefit:** Also keeps the in-memory Excel data cache warm between real requests
-- **Limitation:** Not 100% guaranteed — Azure can still recycle instances during platform updates, but eliminates >95% of cold starts in practice
+The repo also includes a **KeepAlive** timer-triggered function (`0 */4 * * * *`) that pings the host every 4 minutes. This is **redundant on the default B1 + `alwaysOn` configuration** but kept in the code as a safety net for users who switch to a Consumption plan (where `alwaysOn` isn't available). The timer also keeps the in-memory Excel data cache warm between real requests.
 
 ## Technology Stack
 
